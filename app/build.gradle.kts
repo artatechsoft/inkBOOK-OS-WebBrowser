@@ -1,3 +1,4 @@
+import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -21,6 +22,19 @@ fun showUpdateButton(): String {
 }
 
 android {
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    val keystoreProperties = Properties()
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+
+    signingConfigs {
+        getByName("debug") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            storeFile = file("platform_rk3566.keystore")
+            keyPassword  = keystoreProperties["keyPassword"] as String
+            storePassword  = keystoreProperties["storePassword"] as String
+        }
+    }
+
     compileSdk = 34
     buildToolsVersion = "34.0.0"
 
@@ -43,6 +57,7 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.txt"
@@ -52,11 +67,25 @@ android {
             isDebuggable = true
             isMinifyEnabled = false
             isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+
+    applicationVariants.all {
+        val variant = this
+        variant.outputs
+            .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { output ->
+                val sdf = SimpleDateFormat("yyMMdd.HHmm")
+                val buildTime = sdf.format(Date(System.currentTimeMillis()))
+                val outputFileName =
+                    "webbrowser_${variant.baseName}_${variant.versionName}_${buildTime}.apk"
+                output.outputFileName = outputFileName
+            }
     }
 
     buildFeatures {
