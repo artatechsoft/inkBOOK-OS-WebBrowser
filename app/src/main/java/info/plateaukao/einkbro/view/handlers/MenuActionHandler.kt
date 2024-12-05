@@ -106,7 +106,7 @@ class MenuActionHandler(
             MenuItemType.BoldFont -> config::boldFontStyle.toggle()
             MenuItemType.BlackFont -> config::blackFontStyle.toggle()
             MenuItemType.Search -> browserController.showSearchPanel()
-            MenuItemType.Download -> BrowserUnit.openDownloadFolder(activity)
+            MenuItemType.Download -> BrowserUnit.openFilesDownloadFolder(activity)
             MenuItemType.SaveArchive -> browserController.showWebArchiveFilePicker()
             MenuItemType.Settings -> IntentUnit.gotoSettings(activity)
 
@@ -155,7 +155,7 @@ class MenuActionHandler(
     private fun showFileListConfirmDialog() {
         dialogManager.showOkCancelDialog(
             messageResId = R.string.toast_downloadComplete,
-            okAction = { BrowserUnit.openDownloadFolder(activity) }
+            okAction = { BrowserUnit.openFilesDownloadFolder(activity) }
         )
     }
 }

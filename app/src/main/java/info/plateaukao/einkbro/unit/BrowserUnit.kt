@@ -132,7 +132,7 @@ object BrowserUnit : KoinComponent {
                     messageResId = R.string.toast_downloadComplete,
                     okAction = {
                         try {
-                            activity.startActivity(fileIntent)
+                            openFilesDownloadFolder(activity)
                         } catch (e: Exception) {
                             e.printStackTrace()
                             NinjaToast.show(activity, R.string.toast_error)
@@ -141,6 +141,10 @@ object BrowserUnit : KoinComponent {
                 )
             }
         }
+    }
+
+    fun openFilesDownloadFolder(context: Context) {
+        context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
     }
 
     fun openDownloadFolder(activity: Activity) {
