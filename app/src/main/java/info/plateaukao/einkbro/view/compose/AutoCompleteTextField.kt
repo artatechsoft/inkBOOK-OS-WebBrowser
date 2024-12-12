@@ -210,6 +210,7 @@ fun TextInput(
         BasicTextField(
             value = state.value,
             singleLine = true,
+            maxLines = 1,
             modifier = modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
@@ -236,10 +237,10 @@ fun TextInput(
             cursorBrush = SolidColor(MaterialTheme.colors.onBackground),
             onValueChange = { state.value = it },
             keyboardOptions = KeyboardOptions(
-                imeAction = ImeAction.Search,
-                autoCorrect = false,
+                imeAction = ImeAction.Done,
+                autoCorrectEnabled = false
             ),
-            keyboardActions = KeyboardActions(onSearch = { onValueSubmit(state.value.text) }),
+            keyboardActions = KeyboardActions(onDone = { onValueSubmit(state.value.text) }),
         )
         if (state.value.text.isEmpty()) {
             Text(
