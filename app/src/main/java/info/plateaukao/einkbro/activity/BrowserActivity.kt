@@ -2692,6 +2692,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun onPause() {
         super.onPause()
+        ViewUnit.hideKeyboard(this)
         actionModeMenuViewModel.finish()
         if (!config.continueMedia && !isMeetPipCriteria()) {
             if (this::ninjaWebView.isInitialized) {
