@@ -1,3 +1,4 @@
+import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -49,7 +50,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 14_07_00
-        versionName = "14.7.0"
+        versionName = "14.7.0.1"
 
         buildConfigField("String", "lastCommitTime", "\"${getLastCommitTimeStamp()}\"")
         buildConfigField("boolean", "showUpdateButton", showUpdateButton())
