@@ -1,6 +1,7 @@
 package info.plateaukao.einkbro.service
 
 import android.util.Log
+import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.preference.GptActionType
 import info.plateaukao.einkbro.service.data.Content
@@ -8,6 +9,7 @@ import info.plateaukao.einkbro.service.data.ContentPart
 import info.plateaukao.einkbro.service.data.RequestData
 import info.plateaukao.einkbro.service.data.ResponseData
 import info.plateaukao.einkbro.service.data.SafetySetting
+import info.plateaukao.einkbro.viewmodel.unescape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -26,6 +28,7 @@ import okio.buffer
 import okio.source
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -53,15 +56,15 @@ class OpenAiRepository : KoinComponent {
 
     fun chatStream(
         messages: List<ChatMessage>,
-        gptActionType: GptActionType,
+        gptActionInfo: ChatGPTActionInfo,
         appendResponseAction: (String) -> Unit,
         doneAction: () -> Unit = {},
         failureAction: () -> Unit,
     ) {
-        if (gptActionType == GptActionType.Gemini) {
-            geminiStream(messages, appendResponseAction, doneAction, failureAction)
+        if (gptActionInfo.actionType == GptActionType.Gemini) {
+            geminiStream(messages, appendResponseAction, gptActionInfo, doneAction, failureAction)
         } else {
-            openAiStream(messages, appendResponseAction, doneAction, failureAction)
+            openAiStream(messages, appendResponseAction, doneAction, gptActionInfo, failureAction)
         }
     }
 
@@ -69,14 +72,15 @@ class OpenAiRepository : KoinComponent {
         messages: List<ChatMessage>,
         appendResponseAction: (String) -> Unit,
         doneAction: () -> Unit = {},
+        gptActionInfo: ChatGPTActionInfo,
         failureAction: () -> Unit,
     ) {
-        val request = createCompletionRequest(messages, true)
+        val request = createCompletionRequest(messages, gptActionInfo, true)
 
         eventSource?.cancel()
         eventSource = factory.newEventSource(request, object : okhttp3.sse.EventSourceListener() {
             override fun onEvent(
-                eventSource: EventSource, id: String?, type: String?, data: String
+                eventSource: EventSource, id: String?, type: String?, data: String,
             ) {
                 if (data == "[DONE]") {
                     doneAction()
@@ -90,6 +94,7 @@ class OpenAiRepository : KoinComponent {
                         json.decodeFromString(ChatCompletionDelta.serializer(), data)
                     appendResponseAction(chatCompletion.choices.first().delta.content.orEmpty())
                 } catch (e: Exception) {
+                    Log.e("OpenAiRepository", "Error parsing chat completion: $data", e)
                     failureAction()
                     eventSource.cancel()
                     this@OpenAiRepository.eventSource = null
@@ -98,7 +103,12 @@ class OpenAiRepository : KoinComponent {
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 super.onFailure(eventSource, t, response)
-                failureAction()
+                if(response?.code == 200) {
+                    doneAction()
+                    this@OpenAiRepository.eventSource = null
+                } else {
+                    failureAction()
+                }
             }
         })
     }
@@ -106,81 +116,106 @@ class OpenAiRepository : KoinComponent {
     private fun geminiStream(
         messages: List<ChatMessage>,
         appendResponseAction: (String) -> Unit,
+        gptActionInfo: ChatGPTActionInfo,
         doneAction: () -> Unit = {},
         failureAction: () -> Unit,
     ) {
-        val request = createGeminiRequest(messages, true)
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                failureAction()
-                return
-            }
-            val inputStream = response.body?.byteStream() ?: return
-            inputStream.source().buffer().use { source ->
-                while (!source.exhausted()) {
-                    val chunk = source.readUtf8Line()
-                    if (chunk == null) {
-                        failureAction()
-                        return
-                    }
-                    try {
+        if (config.geminiApiKey.isEmpty()) {
+            appendResponseAction("no gemini api key")
+            return
+        }
+        val request = createGeminiRequest(messages, gptActionInfo, true)
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    failureAction()
+                    return
+                }
+                val inputStream = response.body?.byteStream() ?: return
+                val textField = "\"text\": \""
+                val finishReasonString = "\"finishReason\": \""
+                inputStream.source().buffer().use { source ->
+                    while (!source.exhausted()) {
+                        val chunk = source.readUtf8Line()
+                        if (chunk == null) {
+                            failureAction()
+                            return
+                        }
                         Log.d("OpenAiRepository", "chunk: $chunk")
-                        val textField = "\"text\": \""
                         if (chunk.contains(textField)) {
                             var text =
                                 chunk.substringAfter(textField).removeSuffix("\"")
                             Log.d("OpenAiRepository", "text: $text")
-                            appendResponseAction(text)
+                            appendResponseAction(text.unescape())
+                        } else if (chunk.contains(finishReasonString)) {
+                            val finishReason = chunk.substringAfter(finishReasonString)
+                            Log.d("OpenAiRepository", "finishReason: $finishReason")
+                            if (finishReason.contains("STOP")) {
+                                doneAction()
+                                eventSource?.cancel()
+                            }
                         }
-                    } catch (e: Exception) {
-                        failureAction()
-                        return
                     }
                 }
             }
+        } catch (e: Exception) {
+            Log.e("OpenAiRepository", "Error fetching Gemini stream", e)
+            failureAction()
+            return
         }
     }
 
     suspend fun tts(text: String): ByteArray? = suspendCoroutine { continuation ->
-        val request = createTtsRequest(text, speed = (config.ttsSpeedValue / 100F).toDouble())
+        val request = createTtsRequest(
+            text,
+            speed = (config.ttsSpeedValue / 100F).toDouble(),
+            voiceOption = config.gptVoiceOption,
+        )
 
-        client.newCall(request).execute().use { response ->
-            if (response.code != 200 || response.body == null) {
-                return@use continuation.resume(null)
-            }
-            try {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.code != 200 || response.body == null) {
+                    return@use continuation.resume(null)
+                }
                 continuation.resume(response.body?.bytes())
-            } catch (e: Exception) {
-                continuation.resume(null)
             }
+        } catch (e: Exception) {
+            Log.e("OpenAiRepository", "Error fetching TTS", e)
+            continuation.resume(null)
         }
     }
 
     suspend fun chatCompletion(
-        messages: List<ChatMessage>
+        messages: List<ChatMessage>,
+        gptActionInfo: ChatGPTActionInfo,
     ): ChatCompletion? = suspendCoroutine { continuation ->
-        val request = createCompletionRequest(messages)
-        client.newCall(request).execute().use { response ->
-            if (response.code != 200 || response.body == null) {
-                return@use continuation.resume(null)
-            }
+        val request = createCompletionRequest(messages, gptActionInfo)
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.code != 200 || response.body == null) {
+                    return@use continuation.resume(null)
+                }
 
-            val responseString = response.body?.string().orEmpty()
-            try {
+                val responseString = response.body?.string().orEmpty()
                 val chatCompletion =
                     json.decodeFromString(ChatCompletion.serializer(), responseString)
                 Log.d("OpenAiRepository", "chatCompletion: $chatCompletion")
                 continuation.resume(chatCompletion)
-            } catch (e: Exception) {
-                continuation.resume(null)
             }
+        } catch (e: Exception) {
+            Log.e("OpenAiRepository", "Error fetching chat completion", e)
+            continuation.resume(null)
         }
     }
 
-    suspend fun queryGemini(messages: List<ChatMessage>, apiKey: String): String {
+    suspend fun queryGemini(messages: List<ChatMessage>, gptActionInfo: ChatGPTActionInfo): String {
         return withContext(Dispatchers.IO) {
             try {
-                val request = createGeminiRequest(messages, false)
+                if (config.geminiApiKey.isEmpty()) {
+                    return@withContext "no gemini api key"
+                }
+
+                val request = createGeminiRequest(messages, gptActionInfo, false)
                 val response: Response = client.newCall(request).execute()
                 if (!response.isSuccessful) {
                     return@withContext "Error querying Gemini API: ${response.code}"
@@ -192,14 +227,19 @@ class OpenAiRepository : KoinComponent {
                 responseData.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
                     ?: "No content available"
             } catch (exception: Exception) {
+                Log.e("OpenAiRepository", "Error querying Gemini API", exception)
                 "something wrong"
             }
         }
     }
 
-    private fun createGeminiRequest(messages: List<ChatMessage>, isStream: Boolean): Request {
+    private fun createGeminiRequest(
+        messages: List<ChatMessage>,
+        gptActionInfo: ChatGPTActionInfo,
+        isStream: Boolean,
+    ): Request {
         val apiPrefix = "https://generativelanguage.googleapis.com/v1beta/models/"
-        val model = config.geminiModel
+        val model = gptActionInfo.model
         val apiUrl = if (isStream)
             "$apiPrefix$model:streamGenerateContent?key=${config.geminiApiKey}"
         else
@@ -246,45 +286,39 @@ class OpenAiRepository : KoinComponent {
 
     private fun createCompletionRequest(
         messages: List<ChatMessage>,
+        gptActionInfo: ChatGPTActionInfo,
         stream: Boolean = false,
     ): Request = Request.Builder()
-        .url("${getCurrentServerUrl()}$completionPath")
+        .url("${getServerUrl(gptActionInfo.actionType)}$completionPath")
         .post(
-            json.encodeToString(ChatRequest(getCurrentModel(), messages, stream))
+            json.encodeToString(ChatRequest(gptActionInfo.model, messages, stream))
                 .toRequestBody(mediaType)
         )
         .header("Authorization", "Bearer $apiKey")
         .build()
 
-    private fun getCurrentServerUrl(): String {
-        return if (config.useCustomGptUrl && config.gptUrl.isNotBlank()) {
+    private fun getServerUrl(gptActionType: GptActionType): String {
+        return if (gptActionType == GptActionType.SelfHosted) {
             config.gptUrl
         } else {
             "https://api.openai.com"
         }
     }
 
-    private fun getCurrentModel(): String {
-        return if (!config.useCustomGptUrl) {
-            config.gptModel
-        } else {
-            config.alternativeModel
-        }
-    }
-
     private fun createTtsRequest(
         text: String,
-        hd: Boolean = false,
         speed: Double = 1.0,
+        voiceOption: GptVoiceOption = GptVoiceOption.Alloy,
     ): Request = Request.Builder()
-        .url("${getCurrentServerUrl()}$ttsPath")
+        .url("${getServerUrl(GptActionType.OpenAi)}$ttsPath")
         .post(
             json.encodeToString(
                 TTSRequest(
                     text,
-                    if (hd) "tts-1-hd" else "tts-1",
-                    "alloy",
-                    speed
+                    config.gptVoiceModel,
+                    voiceOption.name.lowercase(Locale("en")),
+                    speed,
+                    instructions = config.gptVoicePrompt
                 )
             )
                 .toRequestBody(mediaType)
@@ -305,7 +339,7 @@ data class ChatCompletion(
     val created: Int,
     val model: String,
     val choices: List<ChatChoice>,
-    val usage: ChatUsage = ChatUsage(0, 0, 0)
+    val usage: ChatUsage = ChatUsage(0, 0, 0),
 )
 
 @Serializable
@@ -323,7 +357,7 @@ data class ChatUsage(
     @SerialName("completion_tokens")
     val completeTokens: Int,
     @SerialName("total_tokens")
-    val totalTokens: Int
+    val totalTokens: Int,
 )
 
 @Serializable
@@ -371,7 +405,7 @@ data class ChatDelta(
 @Serializable
 data class ChatMessage(
     val content: String,
-    val role: ChatRole
+    val role: ChatRole,
 )
 
 @Serializable
@@ -380,5 +414,10 @@ data class TTSRequest(
     val model: String,
     val voice: String,
     val speed: Double = 1.0,
-    val format: String = "aac"
+    val format: String = "aac",
+    val instructions: String = "",
 )
+
+enum class GptVoiceOption {
+    Alloy, Echo, Fable, Onyx, Nova, Shimmer
+}

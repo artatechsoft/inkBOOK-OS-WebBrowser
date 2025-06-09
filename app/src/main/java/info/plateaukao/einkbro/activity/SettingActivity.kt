@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowInsets
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.annotation.StringRes
@@ -30,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -52,9 +52,9 @@ import info.plateaukao.einkbro.activity.SettingRoute.Toolbar
 import info.plateaukao.einkbro.activity.SettingRoute.Ui
 import info.plateaukao.einkbro.activity.SettingRoute.UserAgent
 import info.plateaukao.einkbro.activity.SettingRoute.valueOf
-import info.plateaukao.einkbro.browser.AdBlockV2
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.preference.HighlightStyle
+import info.plateaukao.einkbro.preference.TranslationTextStyle
 import info.plateaukao.einkbro.setting.ActionSettingItem
 import info.plateaukao.einkbro.setting.BooleanSettingItem
 import info.plateaukao.einkbro.setting.DividerSettingItem
@@ -71,7 +71,6 @@ import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.LocaleManager
 import info.plateaukao.einkbro.view.GestureType
-import info.plateaukao.einkbro.view.NinjaToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.view.dialog.PrinterDocumentPaperSizeDialog
@@ -80,10 +79,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 
-class SettingActivity : ComponentActivity() {
+class SettingActivity : FragmentActivity() {
     private val config: ConfigManager by inject()
     private val dialogManager: DialogManager by lazy { DialogManager(this) }
-    private val adBlock: AdBlockV2 by inject()
     private val backupUnit: BackupUnit by lazy { BackupUnit(this) }
 
     private lateinit var openBookmarkFileLauncher: ActivityResultLauncher<Intent>
@@ -361,6 +359,16 @@ class SettingActivity : ComponentActivity() {
     )
 
     private val uiSettingItems = listOf(
+        ActionSettingItem(
+            R.string.setting_app_locale,
+            0,
+            R.string.setting_summary_app_locale,
+        ) {
+            lifecycleScope.launch {
+                TranslationLanguageDialog(this@SettingActivity).showAppLocale()
+                config.restartChanged = true
+            }
+        },
         BooleanSettingItem(
             R.string.hide_statusbar,
             0,
@@ -397,6 +405,12 @@ class SettingActivity : ComponentActivity() {
             0,
             R.string.setting_summary_page_left_value,
             config::pageReservedOffsetInString
+        ),
+        ValueSettingItem(
+            R.string.setting_title_reader_mode_padding,
+            0,
+            R.string.setting_summary_reader_mode_padding,
+            config::paddingForReaderMode
         ),
         ListSettingWithEnumItem(
             R.string.dark_mode,
@@ -439,16 +453,6 @@ class SettingActivity : ComponentActivity() {
             R.string.setting_summary_clear_recent_bookmarks,
         ) {
             config.clearRecentBookmarks()
-        },
-        ActionSettingItem(
-            R.string.setting_app_locale,
-            0,
-            R.string.setting_summary_app_locale,
-        ) {
-            lifecycleScope.launch {
-                TranslationLanguageDialog(this@SettingActivity).showAppLocale()
-                config.restartChanged = true
-            }
         },
     )
 
@@ -552,6 +556,13 @@ class SettingActivity : ComponentActivity() {
     )
 
     private val toolbarSettingItems = listOf(
+        ActionSettingItem(
+            R.string.toolbar_icons,
+            0,
+            R.string.toolbar_icons_description,
+        ) {
+            startActivity(Intent(this, ToolbarConfigActivity::class.java))
+        },
         BooleanSettingItem(
             R.string.setting_title_toolbar_top,
             0,
@@ -579,12 +590,9 @@ class SettingActivity : ComponentActivity() {
     )
 
     private val gestureSettingItems = listOf(
-        ActionSettingItem(
+        DividerSettingItem(
             R.string.setting_title_touch_area_actions,
-            0,
-            R.string.summary_touch_aciton_settings,
-            span = 2
-        ) { },
+        ),
         ListSettingWithEnumItem(
             R.string.setting_touch_up_click,
             0,
@@ -609,6 +617,7 @@ class SettingActivity : ComponentActivity() {
             config = config::downLongClickGesture,
             options = GestureType.entries.map { it.resId },
         ),
+        DividerSettingItem(R.string.setting_multitouch_use_title),
         BooleanSettingItem(
             R.string.setting_multitouch_use_title,
             0,
@@ -640,7 +649,7 @@ class SettingActivity : ComponentActivity() {
             config = config::multitouchRight,
             options = GestureType.entries.map { it.resId },
         ),
-        DividerSettingItem(),
+        DividerSettingItem(R.string.gesture_on_floating_button),
         BooleanSettingItem(
             R.string.setting_gestures_use_title,
             0,
@@ -810,8 +819,15 @@ class SettingActivity : ComponentActivity() {
             0,
             R.string.setting_summary_highlight_style,
             config = config::highlightStyle,
-            options = HighlightStyle.entries.filter { it != HighlightStyle.BACKGROUND_NONE }
+            options = HighlightStyle.entries
                 .map { it.stringResId },
+        ),
+        ListSettingWithEnumItem(
+            R.string.setting_title_translation_style,
+            0,
+            R.string.setting_summary_translation_style,
+            config = config::translationTextStyle,
+            options = TranslationTextStyle.entries.map { it.stringResId },
         ),
         NavigateSettingItem(
             R.string.setting_title_userAgent,
@@ -830,12 +846,12 @@ class SettingActivity : ComponentActivity() {
             ).show()
         },
         DividerSettingItem(),
-        BooleanSettingItem(
-            R.string.setting_title_enable_inplace_translate,
-            0,
-            R.string.setting_summary_enable_inplace_translate,
-            config::enableInplaceParagraphTranslate
-        ),
+//        BooleanSettingItem(
+//            R.string.setting_title_enable_inplace_translate,
+//            0,
+//            R.string.setting_summary_enable_inplace_translate,
+//            config::enableInplaceParagraphTranslate
+//        ),
         ValueSettingItem(
             R.string.setting_title_translated_langs,
             0,
@@ -899,7 +915,38 @@ class SettingActivity : ComponentActivity() {
             R.string.setting_summary_chat_stream,
             config::enableOpenAiStream
         ),
-        DividerSettingItem(),
+        DividerSettingItem(R.string.web_content_processing),
+        ListSettingWithEnumItem(
+            R.string.summary_gpt_type,
+            0,
+            R.string.setting_summary_summary_gpt_type,
+            config::gptForSummary,
+            listOf(
+                R.string.system_default,
+                R.string.openai,
+                R.string.self_hosted,
+                R.string.google_gemini
+            )
+        ),
+        ValueSettingItem(
+            R.string.setting_title_gpt_prompt_for_web_page,
+            0,
+            R.string.setting_summary_gpt_prompt_for_web_page,
+            config::gptUserPromptForWebPage
+        ),
+        ListSettingWithEnumItem(
+            R.string.web_processing_gpt_type,
+            0,
+            R.string.setting_summary_web_processing_gpt_type,
+            config::gptForChatWeb,
+            listOf(
+                R.string.system_default,
+                R.string.openai,
+                R.string.self_hosted,
+                R.string.google_gemini
+            )
+        ),
+        DividerSettingItem(R.string.openai),
         ValueSettingItem(
             R.string.setting_title_edit_gpt_api_key,
             0,
@@ -919,12 +966,18 @@ class SettingActivity : ComponentActivity() {
             config::useOpenAiTts
         ),
         ValueSettingItem(
-            R.string.setting_title_gpt_prompt_for_web_page,
+            R.string.setting_title_gpt_audio_model_name,
             0,
-            R.string.setting_summary_gpt_prompt_for_web_page,
-            config::gptUserPromptForWebPage
+            R.string.setting_summary_gpt_audio_model_name,
+            config::gptVoiceModel
         ),
-        DividerSettingItem(),
+        ValueSettingItem(
+            R.string.setting_title_gpt_prompt_for_tts,
+            0,
+            R.string.setting_summary_gpt_prompt_for_tts,
+            config::gptVoicePrompt
+        ),
+        DividerSettingItem(R.string.openai_compatible_server),
         BooleanSettingItem(
             R.string.setting_title_use_custom_gpt_url,
             0,
@@ -943,7 +996,7 @@ class SettingActivity : ComponentActivity() {
             R.string.setting_summary_custom_gpt_url,
             config::gptUrl
         ),
-        DividerSettingItem(),
+        DividerSettingItem(R.string.google_gemini),
         BooleanSettingItem(
             R.string.setting_title_use_gemini,
             0,
@@ -1013,34 +1066,19 @@ class SettingActivity : ComponentActivity() {
             R.string.setting_summary_adblock,
             config::adBlock
         ),
-        BooleanSettingItem(
-            R.string.setting_title_adblock_auto_update,
-            0,
-            R.string.setting_summary_adblock_auto_update,
-            config::autoUpdateAdblock
-        ),
-        ActionSettingItem(
-            R.string.setting_title_whitelist,
-            0,
-            R.string.setting_summary_whitelist,
-        ) { startActivity(DataListActivity.createIntent(this, WhiteListType.Adblock)) },
         ActionSettingItem(
             R.string.setting_title_update_adblock,
             0,
             R.string.setting_summary_update_adblock,
         ) {
-            lifecycleScope.launch {
-                adBlock.downloadHosts(this@SettingActivity) {
-                    NinjaToast.show(this@SettingActivity, R.string.toast_adblock_updated)
-                }
-            }
+            startActivity(Intent(this, AdBlockSettingActivity::class.java))
+            finish()
         },
-        ValueSettingItem(
-            R.string.setting_title_adblock_url,
+        ActionSettingItem(
+            R.string.setting_title_whitelist,
             0,
-            R.string.setting_summary_adblock_url,
-            config = config::adblockHostUrl,
-        ),
+            R.string.setting_summary_whitelist,
+        ) { startActivity(DataListActivity.createIntent(this, WhiteListType.Adblock)) },
         DividerSettingItem(),
         BooleanSettingItem(
             R.string.setting_title_javascript,

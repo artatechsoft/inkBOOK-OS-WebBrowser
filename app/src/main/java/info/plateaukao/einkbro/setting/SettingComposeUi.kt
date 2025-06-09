@@ -33,10 +33,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -83,7 +84,7 @@ fun SettingItemUi(
     ) {
         if (setting.iconId != 0) {
             Icon(
-                painter = painterResource(id = setting.iconId), contentDescription = null,
+                imageVector = ImageVector.vectorResource(id = setting.iconId), contentDescription = null,
                 modifier = Modifier
                     .padding(horizontal = 6.dp)
                     .fillMaxHeight(),
@@ -121,6 +122,7 @@ fun SettingItemUi(
 
 @Composable
 fun DividerSettingItemUi(
+    title: Int = 0,
     supportTwoSpan: Boolean = false,
 ) {
     if (!supportTwoSpan) {
@@ -130,13 +132,33 @@ fun DividerSettingItemUi(
                 .height(6.dp)
         ) {
             HorizontalSeparator()
+            if (title != 0) {
+                Text(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(5.dp),
+                    text = stringResource(title),
+                    style = MaterialTheme.typography.h6,
+                    color = MaterialTheme.colors.onBackground
+                )
+            }
         }
     } else {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(16.dp)
-        )
+        if (title != 0) {
+            Text(
+                modifier = Modifier
+                    .padding(5.dp),
+                text = stringResource(title),
+                style = MaterialTheme.typography.h6,
+                color = MaterialTheme.colors.onBackground,
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(16.dp)
+            )
+        }
     }
 }
 
@@ -305,7 +327,8 @@ fun SettingScreen(
                         setting.showValue
                     )
 
-                    is DividerSettingItem -> DividerSettingItemUi(supportTwoSpan)
+                    is DividerSettingItem ->
+                        DividerSettingItemUi(setting.titleResId, supportTwoSpan)
 
                     is ListSettingWithEnumItem<*> -> ListSettingItemUi(
                         setting,
@@ -325,7 +348,7 @@ fun SettingScreen(
                     ) { linkAction(setting.url) }
 
                     is VersionSettingItem -> {
-                        val version = " v${BuildConfig.VERSION_NAME} (${BuildConfig.builtDateTime})"
+                        val version = " v${BuildConfig.VERSION_NAME} (${BuildConfig.lastCommitTime})"
                         SettingItemUi(setting, false, version, showBorder) {
                             navController.navigate(setting.destination.name)
                         }

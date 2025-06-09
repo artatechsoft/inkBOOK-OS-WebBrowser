@@ -1,5 +1,6 @@
 package info.plateaukao.einkbro.viewmodel
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
@@ -7,7 +8,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import info.plateaukao.einkbro.database.Bookmark
 import info.plateaukao.einkbro.database.BookmarkManager
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -28,20 +28,27 @@ class BookmarkViewModel(private val bookmarkManager: BookmarkManager) : ViewMode
 
     private var sortMode = BookmarkManager.SortMode.BY_ORDER
 
-    private var updateJob: Job? = null
     private fun updateUiState() {
-        updateJob?.cancel()
-        updateJob = viewModelScope.launch {
-            bookmarkManager.getBookmarksByParentFlow(folderStack.peek().id).collect {
-                currentFolder.value = folderStack.peek()
-                if (sortMode == BookmarkManager.SortMode.BY_ORDER) {
-                    _uiState.value = it.sortedBy { bookmark -> bookmark.order }
-                } else {
-                    _uiState.value = it.sortedBy { bookmark -> bookmark.title }
-                }
+        viewModelScope.launch {
+            val bookmarks = bookmarkManager.getBookmarksByParent(folderStack.peek().id)
+            currentFolder.value = folderStack.peek()
+            if (sortMode == BookmarkManager.SortMode.BY_ORDER) {
+                _uiState.value = bookmarks.sortedBy { bookmark -> bookmark.order }
+            } else {
+                _uiState.value = bookmarks.sortedBy { bookmark -> bookmark.title }
             }
         }
     }
+
+    fun deleteBookmark(bookmark: Bookmark) {
+        viewModelScope.launch {
+            bookmarkManager.delete(bookmark)
+            updateUiState()
+        }
+    }
+
+    fun getFavicon(bookmark: Bookmark): Bitmap? =
+        bookmarkManager.findFaviconBy(bookmark.url)?.getBitmap()
 
     fun toRootFolder() {
         while (folderStack.size > 1) {
@@ -62,10 +69,11 @@ class BookmarkViewModel(private val bookmarkManager: BookmarkManager) : ViewMode
         updateUiState()
     }
 
-    fun insertBookmark(bookmark: Bookmark) {
+    fun insertBookmark(bookmark: Bookmark, doneAction: (() -> Unit)? = null) {
         viewModelScope.launch {
             bookmarkManager.insert(bookmark)
             updateUiState()
+            doneAction?.invoke()
         }
     }
 

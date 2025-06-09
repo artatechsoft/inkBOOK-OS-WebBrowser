@@ -32,6 +32,15 @@ import androidx.compose.material.Divider
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -40,12 +49,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -56,7 +67,6 @@ import androidx.lifecycle.lifecycleScope
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.unit.ShareUtil
 import info.plateaukao.einkbro.unit.ViewUnit
-import info.plateaukao.einkbro.view.NinjaToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.dialog.TranslationLanguageDialog
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
@@ -76,7 +86,7 @@ class TranslateDialogFragment(
         MyTheme {
             TranslateResponse(
                 translationViewModel,
-                showExtraIcons = config.papagoApiSecret.isNotBlank(),
+                showExtraIcons = config.imageApiKey.isNotBlank(),
                 this::changeTranslationLanguage,
                 this::getTranslationWebView,
                 closeAction ?: { dismiss() }
@@ -162,9 +172,9 @@ private fun TranslateResponse(
             if (ViewUnit.isTablet(LocalContext.current)) {
                 GptRow(viewModel)
             }
-            DeepLButton(iconSize, iconPadding, translateDeepL, onTargetLanguageClick)
             GoogleButton(iconSize, iconPadding, translateGoogle, onTargetLanguageClick)
             if (showExtraIcons) {
+                DeepLButton(iconSize, iconPadding, translateDeepL, onTargetLanguageClick)
                 PapagoButton(iconSize, iconPadding, translatePapago, onTargetLanguageClick)
                 NaverButton(iconSize, iconPadding, translateNaver)
             }
@@ -229,7 +239,7 @@ private fun CloseButton(
     closeClick: () -> Unit,
 ) {
     Icon(
-        painter = painterResource(id = R.drawable.icon_close),
+        imageVector = Icons.Default.Close,
         contentDescription = "Close Icon",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -245,9 +255,7 @@ private fun InfoButton(
     iconSize: Dp,
 ) {
     Icon(
-        painter = painterResource(
-            id = if (showRequest.value) R.drawable.icon_arrow_up_gest else R.drawable.icon_info
-        ),
+        imageVector = if (showRequest.value) Icons.Default.KeyboardArrowUp else Icons.Outlined.Info,
         contentDescription = "Info Icon",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -266,7 +274,7 @@ private fun NaverButton(
     translateNaver: () -> Unit,
 ) {
     Icon(
-        painter = painterResource(id = R.drawable.icon_search),
+        imageVector = Icons.Default.Search,
         contentDescription = "Naver dict icon",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -287,7 +295,7 @@ private fun PapagoButton(
     onTargetLanguageClick: () -> Unit,
 ) {
     Icon(
-        painter = painterResource(id = R.drawable.ic_papago),
+        imageVector = ImageVector.vectorResource(id = R.drawable.ic_papago),
         contentDescription = "Papago Translate Icon",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -309,7 +317,7 @@ private fun GoogleButton(
     onTargetLanguageClick: () -> Unit,
 ) {
     Icon(
-        painter = painterResource(id = R.drawable.ic_translate_google),
+        imageVector = ImageVector.vectorResource(id = R.drawable.ic_translate_google),
         contentDescription = "Google Translate",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -331,7 +339,7 @@ private fun DeepLButton(
     onTargetLanguageClick: () -> Unit,
 ) {
     Icon(
-        painter = painterResource(id = R.drawable.ic_translate),
+        imageVector = Icons.Default.Translate,
         contentDescription = "Deepl Translate",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -352,7 +360,7 @@ private fun CopyButton(
 ) {
     val context = LocalContext.current
     Icon(
-        painter = painterResource(id = R.drawable.ic_copy),
+        imageVector = Icons.Default.ContentCopy,
         contentDescription = "Copy text",
         tint = MaterialTheme.colors.onBackground,
         modifier = Modifier
@@ -372,15 +380,22 @@ private fun GptRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End,
     ) {
-        val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
+
+        val saveIcon = Icons.Default.Save
+        var currentIcon by remember { mutableStateOf(saveIcon) }
+
+
         ActionMenuItem(
             "",
-            context.getDrawable(R.drawable.icon_menu_save),
+            iconDrawable = null,
+            imageVector = currentIcon,
             onClicked = {
                 coroutineScope.launch {
                     translationViewModel.saveTranslationResult()
-                    NinjaToast.show(context, R.string.toast_saved)
+                    currentIcon = Icons.Filled.Done
+                    delay(1000) // Wait for 0.5 seconds
+                    currentIcon = saveIcon
                 }
             }
         )
@@ -388,7 +403,7 @@ private fun GptRow(
             val gptClicked = remember {
                 {
                     translationViewModel.gptActionInfo = gptActionInfo
-                    translationViewModel.translate(TRANSLATE_API.GPT)
+                    translationViewModel.translate(TRANSLATE_API.LLM)
                 }
             }
             val gptLongClicked =

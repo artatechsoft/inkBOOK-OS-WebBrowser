@@ -29,9 +29,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
@@ -95,7 +98,8 @@ private fun ActionModeMenu(
             val info = menuInfos[index]
             ActionMenuItem(
                 info.title,
-                if (showIcons) info.icon else null,
+                if (showIcons) info.drawable else null,
+                if (showIcons) info.imageVector else null,
                 onClicked = {
                     info.action?.invoke()
                     if (info.closeMenu) onClicked(info.intent)
@@ -113,6 +117,7 @@ private fun ActionModeMenu(
 fun ActionMenuItem(
     title: String,
     iconDrawable: Drawable?,
+    imageVector: ImageVector? = null,
     onClicked: () -> Unit = {},
     onLongClicked: () -> Unit = {},
 ) {
@@ -126,7 +131,7 @@ fun ActionMenuItem(
         else -> 45.dp
     }
 
-    val fontSize = if (iconDrawable == null) 12.sp else
+    val fontSize = if (iconDrawable == null && imageVector == null) 12.sp else
         if (configuration.screenWidthDp > 500) 10.sp else 8.sp
     Column(
         modifier = Modifier
@@ -152,6 +157,16 @@ fun ActionMenuItem(
                     .padding(horizontal = 6.dp),
             )
         }
+        if (imageVector != null) {
+            Image(
+                imageVector = imageVector,
+                colorFilter = ColorFilter.tint(MaterialTheme.colors.onBackground),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(44.dp)
+                    .padding(horizontal = 6.dp),
+            )
+        }
         if (title.isNotEmpty()) {
             Text(
                 modifier = Modifier
@@ -166,5 +181,19 @@ fun ActionMenuItem(
                 color = MaterialTheme.colors.onBackground
             )
         }
+    }
+}
+
+@Preview
+@Composable
+fun PreviewActionMenuItem() {
+    MyTheme {
+        ActionMenuItem(
+            title = "Title",
+            iconDrawable = null,
+            imageVector = null,
+            onClicked = {},
+            onLongClicked = {},
+        )
     }
 }

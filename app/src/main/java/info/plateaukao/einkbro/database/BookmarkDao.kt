@@ -138,8 +138,8 @@ interface BookmarkDao {
     @Query("SELECT * FROM bookmarks WHERE parent = :parentId ORDER BY title COLLATE NOCASE ASC")
     suspend fun getBookmarksByParent(parentId: Int): List<Bookmark>
 
-    @Query("SELECT * FROM bookmarks WHERE parent = :parentId ORDER BY title COLLATE NOCASE ASC")
-    fun getBookmarksByParentFlow(parentId: Int): Flow<List<Bookmark>>
+//    @Query("SELECT * FROM bookmarks WHERE parent = :parentId ORDER BY title COLLATE NOCASE ASC")
+//    fun getBookmarksByParentFlow(parentId: Int): Flow<List<Bookmark>>
 
     @Query("SELECT COUNT(id) FROM bookmarks WHERE url = :url")
     suspend fun existsUrl(url: String): Int
@@ -212,6 +212,7 @@ class BookmarkManager(context: Context) : KoinComponent {
     val bookmarkDao = database.bookmarkDao()
 
     private val faviconDao = database.faviconDao()
+    private val faviconInfos: MutableList<FaviconInfo> = mutableListOf()
 
     private val highlightDao = database.highlightDao()
     private val articleDao = database.articleDao()
@@ -260,8 +261,6 @@ class BookmarkManager(context: Context) : KoinComponent {
         config.whiteBackgroundList = emptyList()
     }
 
-    private val faviconInfos: MutableList<FaviconInfo> = mutableListOf()
-
     private suspend fun getAllFavicons(): List<FaviconInfo> = faviconDao.getAllFavicons()
 
     suspend fun insertArticle(article: Article): Article = articleDao.insertAndGetArticle(article)
@@ -294,20 +293,14 @@ class BookmarkManager(context: Context) : KoinComponent {
         faviconInfos.add(faviconInfo)
     }
 
-    @Synchronized
     fun findFaviconBy(url: String): FaviconInfo? {
         val host = Uri.parse(url).host ?: return null
-        synchronized(faviconInfos) {
-            return faviconInfos.firstOrNull { it.domain == host }
-        }
+        return faviconInfos.firstOrNull { it.domain == host }
     }
 
     suspend fun deleteFavicon(faviconInfo: FaviconInfo) = faviconDao.delete(faviconInfo)
 
     // -- Bookmark --
-
-    fun getBookmarksByParentFlow(parentId: Int): Flow<List<Bookmark>> =
-        bookmarkDao.getBookmarksByParentFlow(parentId)
 
     suspend fun updateBookmarksOrder(bookmarks: List<Bookmark>) {
         withContext(Dispatchers.IO) {

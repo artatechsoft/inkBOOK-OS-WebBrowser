@@ -13,6 +13,9 @@ import info.plateaukao.einkbro.database.Bookmark
 import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.database.DomainConfigurationData
 import info.plateaukao.einkbro.epub.EpubFileInfo
+import info.plateaukao.einkbro.service.GptVoiceOption
+import info.plateaukao.einkbro.tts.entity.VoiceItem
+import info.plateaukao.einkbro.tts.entity.defaultVoiceItem
 import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.util.Constants
 import info.plateaukao.einkbro.util.TranslationLanguage
@@ -20,6 +23,7 @@ import info.plateaukao.einkbro.view.GestureType
 import info.plateaukao.einkbro.view.Orientation
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
+import info.plateaukao.einkbro.viewmodel.TtsType
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.Json.Default.decodeFromString
@@ -133,19 +137,29 @@ class ConfigManager(
     var enableInplaceParagraphTranslate by
     BooleanPreference(sp, K_ENABLE_IN_PLACE_PARAGRAPH_TRANSLATE, true)
 
+    private var originalSaveHistoryMode: SaveHistoryMode? = null
     var isIncognitoMode: Boolean
         get() = sp.getBoolean(K_IS_INCOGNITO_MODE, false)
         set(value) {
-            if (!value) {
-                cookies = false
+            cookies = !value
+            if (value) {
+                originalSaveHistoryMode = saveHistoryMode
                 saveHistoryMode = SaveHistoryMode.DISABLED
+            } else {
+                if (originalSaveHistoryMode != null) {
+                    saveHistoryMode = originalSaveHistoryMode!!
+                    originalSaveHistoryMode = null
+                } else {
+                    saveHistoryMode = toggledSaveHistoryMode
+                }
             }
+
             sp.edit { putBoolean(K_IS_INCOGNITO_MODE, value) }
         }
 
     var useOpenAiTts by BooleanPreference(sp, K_USE_OPENAI_TTS, true)
 
-    var webLoadCacheFirst by BooleanPreference(sp, "sp_web_load_cache_first", true)
+    var webLoadCacheFirst by BooleanPreference(sp, "sp_web_load_cache_first", false)
 
     var pageReservedOffset: Int by IntPreference(sp, K_PRESERVE_HEIGHT, 80)
 
@@ -184,6 +198,9 @@ class ConfigManager(
     var touchAreaCustomizeY by IntPreference(sp, K_TOUCH_AREA_OFFSET, 0)
 
     var fontBoldness by IntPreference(sp, K_FONT_BOLDNESS, 700)
+
+    private val K_PADDING_FOR_READER_MODE = "sp_padding_for_reader_mode"
+    var paddingForReaderMode by IntPreference(sp, K_PADDING_FOR_READER_MODE, 10)
 
     var customUserAgent by StringPreference(sp, K_CUSTOM_USER_AGENT)
     val customProcessTextUrl by StringPreference(sp, K_CUSTOM_PROCESS_TEXT_URL)
@@ -224,13 +241,17 @@ class ConfigManager(
     var gptUserPromptForWebPage by StringPreference(
         sp,
         K_GPT_USER_PROMPT_WEB_PAGE,
-        "Summarize in 300 words:"
+        "Summarize in 50 words:"
     )
-    var papagoApiSecret by StringPreference(sp, K_PAPAGO_API_SECRET, "")
     var imageApiKey by StringPreference(sp, K_IMAGE_API_KEY, "")
-    var gptModel by StringPreference(sp, K_GPT_MODEL, "gpt-3.5-turbo")
+    var gptModel by StringPreference(sp, K_GPT_MODEL, "gpt-4.1")
     var alternativeModel by StringPreference(sp, K_ALTERNATIVE_MODEL, gptModel)
     var geminiModel by StringPreference(sp, K_GEMINI_MODEL, "gemini-1.5-flash")
+    var gptVoiceOption: GptVoiceOption
+        get() = GptVoiceOption.entries[sp.getInt("K_GPT_VOICE_OPTION", 0)]
+        set(value) = sp.edit { putInt("K_GPT_VOICE_OPTION", value.ordinal) }
+    var gptVoiceModel by StringPreference(sp, K_GPT_VOICE_MODEL, "tts-1")
+    var gptVoicePrompt by StringPreference(sp, K_GPT_VOICE_PROMPT, "")
 
     var gptUrl by StringPreference(sp, K_GPT_SERVER_URL, "https://api.openai.com")
     var useCustomGptUrl by BooleanPreference(sp, K_USE_CUSTOM_GPT_URL, false)
@@ -283,6 +304,63 @@ class ConfigManager(
         get() = PaperSize.entries[sp.getInt("pdf_paper_size", PaperSize.ISO_13.ordinal)]
         set(value) {
             sp.edit { putInt("pdf_paper_size", value.ordinal) }
+        }
+
+    var ttsType: TtsType
+        get() = TtsType.entries[sp.getInt("K_TTS_TYPE", 0)]
+        set(value) {
+            sp.edit { putInt("K_TTS_TYPE", value.ordinal) }
+            useOpenAiTts = value == TtsType.GPT
+        }
+
+    var ttsShowCurrentText by BooleanPreference(sp, "K_TTS_SHOW_CURRENT_TEXT", false)
+
+    var ttsShowTextTranslation by BooleanPreference(sp, "K_TTS_SHOW_TEXT_TRANSLATION", false)
+
+    private val K_RECENT_USED_TTS_VOICES = "sp_recent_used_tts_voices"
+    var recentUsedTtsVoices: MutableList<VoiceItem>
+        get() {
+            val string = sp.getString(K_RECENT_USED_TTS_VOICES, "").orEmpty()
+            if (string.isBlank()) return mutableListOf()
+
+            return try {
+                string.split("###")
+                    .mapNotNull { Json.decodeFromString<VoiceItem>(it) }
+                    .toMutableList()
+            } catch (exception: Exception) {
+                sp.edit { remove(K_RECENT_USED_TTS_VOICES) }
+                mutableListOf()
+            }
+        }
+        set(value) {
+            val processedValue = if (value.distinct().size > 5) {
+                value.distinct().subList(0, 5)
+            } else {
+                value.distinct()
+            }
+
+            sp.edit {
+                if (processedValue.isEmpty()) {
+                    remove(K_RECENT_USED_TTS_VOICES)
+                } else {
+                    // check if the new value the same as the old one
+                    putString(
+                        K_RECENT_USED_TTS_VOICES,
+                        processedValue.joinToString("###") { Json.encodeToString(it) }
+                    )
+                }
+            }
+        }
+
+    var ettsVoice: VoiceItem
+        get() = Json.decodeFromString(
+            sp.getString(
+                "K_ETTS_VOICE", Json.encodeToString(defaultVoiceItem)
+            ) ?: Json.encodeToString(defaultVoiceItem)
+        )
+        set(value) {
+            sp.edit { putString("K_ETTS_VOICE", Json.encodeToString(value)) }
+            recentUsedTtsVoices = recentUsedTtsVoices.apply { add(0, value) }
         }
 
     var uiLocaleLanguage by StringPreference(sp, "sp_ui_locale_language", "")
@@ -546,6 +624,10 @@ class ConfigManager(
         get() = HighlightStyle.entries[sp.getInt(K_HIGHLIGHT_STYLE, 0)]
         set(value) = sp.edit { putInt(K_HIGHLIGHT_STYLE, value.ordinal) }
 
+    var translationTextStyle: TranslationTextStyle
+        get() = TranslationTextStyle.entries[sp.getInt("K_TRANSLATION_TEXT_STYLE", 1)]
+        set(value) = sp.edit { putInt("K_TRANSLATION_TEXT_STYLE", value.ordinal) }
+
     var adSites: MutableSet<String>
         get() = sp.getStringSet(K_ADBLOCK_SITES, mutableSetOf()) ?: mutableSetOf()
         set(value) = sp.edit { putStringSet(K_ADBLOCK_SITES, value) }
@@ -667,6 +749,17 @@ class ConfigManager(
                     Json.encodeToString(value)
                 )
             }
+        }
+
+    var gptForChatWeb: GptActionType
+        get() = GptActionType.entries[sp.getInt(K_GPT_FOR_CHAT_WEB, 0)]
+        set(value) {
+            sp.edit { putInt(K_GPT_FOR_CHAT_WEB, value.ordinal) }
+        }
+    var gptForSummary: GptActionType
+        get() = GptActionType.entries[sp.getInt(K_GPT_FOR_SUMMARY, 0)]
+        set(value) {
+            sp.edit { putInt(K_GPT_FOR_SUMMARY, value.ordinal) }
         }
 
     fun getDefaultActionModel(): String = if (useGeminiApi) {
@@ -873,6 +966,8 @@ class ConfigManager(
         const val K_IMAGE_API_KEY = "sp_image_api_key"
         const val K_DUAL_CAPTION_LOCALE = "sp_dual_caption_locale"
         const val K_GPT_MODEL = "sp_gp_model"
+        const val K_GPT_VOICE_MODEL = "sp_gpt_voice_model"
+        const val K_GPT_VOICE_PROMPT = "sp_gpt_voice_prompt"
         const val K_ALTERNATIVE_MODEL = "sp_alternative_model"
         const val K_GEMINI_MODEL = "sp_gemini_model"
         const val K_SPLIT_SEARCH_STRING = "sp_split_search_prefix"
@@ -914,6 +1009,8 @@ class ConfigManager(
         private const val K_SPLIT_SEARCH_ITEMS = "sp_split_search_items"
         const val K_GPT_ACTION_ITEMS = "sp_gpt_action_items"
         private const val K_GPT_ACTION_EXTERNAL = "sp_gpt_action_external"
+        private const val K_GPT_FOR_CHAT_WEB = "sp_gpt_for_chat_web"
+        private const val K_GPT_FOR_SUMMARY = "sp_gpt_for_summary"
 
         private const val K_GPT_SERVER_URL = "sp_gpt_server_url"
         private const val K_USE_CUSTOM_GPT_URL = "sp_use_custom_gpt_url"
@@ -1014,7 +1111,10 @@ enum class TranslationMode(val labelResId: Int) {
     GOOGLE_IN_PLACE(R.string.google_in_place),
     TRANSLATE_BY_PARAGRAPH(R.string.translate_by_paragraph),
     PAPAGO_TRANSLATE_BY_PARAGRAPH(R.string.papago_translate_by_paragraph),
-    PAPAGO_TRANSLATE_BY_SCREEN(R.string.papago_translate_by_screen)
+    PAPAGO_TRANSLATE_BY_SCREEN(R.string.papago_translate_by_screen),
+    DEEPL_BY_PARAGRAPH(R.string.deepl_translate_by_paragraph),
+    OPENAI_BY_PARAGRAPH(R.string.openai_translate_by_paragraph),
+    GEMINI_BY_PARAGRAPH(R.string.gemini_translate_by_paragraph),
 }
 
 enum class FontType(val resId: Int) {
@@ -1022,7 +1122,7 @@ enum class FontType(val resId: Int) {
     SERIF(R.string.serif),
     GOOGLE_SERIF(R.string.googleserif),
     CUSTOM(R.string.custom_font),
-    TC_WENKAI(R.string.wenkai_tc),
+    TC_IANSUI(R.string.iansui_tc),
     JA_MINCHO(R.string.mincho_ja),
     KO_GAMJA(R.string.gamja_flower_ko)
 }
@@ -1065,11 +1165,16 @@ enum class HighlightStyle(
         R.string.pink,
         R.drawable.ic_highlight_color,
     ),
-    BACKGROUND_NONE(
-        null,
-        R.string.menu_delete,
-        R.drawable.icon_delete,
-    )
+}
+
+enum class TranslationTextStyle(
+    val stringResId: Int,
+) {
+    NONE(R.string.none),
+    DASHED_BORDER(R.string.dashed_border),
+    VERTICAL_LINE(R.string.vertical_line),
+    GRAY(R.string.gray),
+    BOLD(R.string.bold),
 }
 
 enum class SaveHistoryMode {

@@ -31,9 +31,11 @@ import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.View
 import android.webkit.MimeTypeMap
 import androidx.activity.result.ActivityResultLauncher
+import androidx.annotation.RequiresApi
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -48,20 +50,21 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetBehavior.BottomSheetCallback
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import info.plateaukao.einkbro.BuildConfig
+import info.plateaukao.einkbro.EinkBroApplication
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.activity.EpubReaderActivity
 import info.plateaukao.einkbro.util.Constants
-import info.plateaukao.einkbro.view.NinjaToast
+import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okio.IOException
 import org.json.JSONArray
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
@@ -79,6 +82,9 @@ object HelperUnit {
         .followSslRedirects(true)
         .build()
 
+
+    fun getStringFromAsset(fileName: String): String =
+        EinkBroApplication.instance.assets.open(fileName).bufferedReader().use { it.readText() }
 
     @JvmStatic
     // return true if need permissions
@@ -144,6 +150,7 @@ object HelperUnit {
         })
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     @JvmStatic
     fun createShortcut(context: Context, title: String?, url: String?, bitmap: Bitmap?) {
         val url = url ?: return
@@ -273,7 +280,7 @@ object HelperUnit {
         activity: Activity,
         uri: Uri,
         resultLauncher: ActivityResultLauncher<Intent>? = null,
-        shouldGoToEnd: Boolean = false
+        shouldGoToEnd: Boolean = false,
     ) {
         val intent = Intent().apply {
             action = Intent.ACTION_VIEW
@@ -288,7 +295,7 @@ object HelperUnit {
         try {
             activity.startActivity(Intent.createChooser(intent, "Open file with"))
         } catch (exception: SecurityException) {
-            NinjaToast.show(activity, "open file failed, re-select the file again.")
+            EBToast.show(activity, "open file failed, re-select the file again.")
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             intent.addCategory(Intent.CATEGORY_OPENABLE)
             intent.type = Constants.MIME_TYPE_ANY
@@ -368,12 +375,11 @@ object HelperUnit {
             try {
                 val jsonArray = JSONArray(response.body!!.string())
                 val latestRelease = jsonArray.getJSONObject(0)
-                val tagName = latestRelease
-                    .getString("tag_name")
-                    .replace("v", "")
-                if (tagName > BuildConfig.VERSION_NAME) {
+                val tagName = latestRelease.getString("tag_name").replace("v", "")
+                val isPreRelease = latestRelease.getBoolean("prerelease")
+                if (tagName > BuildConfig.VERSION_NAME && !isPreRelease) {
                     withContext(Dispatchers.Main) {
-                        NinjaToast.show(context, "Start downloading...")
+                        EBToast.show(context, "Start downloading...")
                     }
 
                     val downloadUrl = latestRelease.getJSONArray("assets")
@@ -385,13 +391,13 @@ object HelperUnit {
                     installApkFromFile(context, file)
                 } else {
                     withContext(Dispatchers.Main) {
-                        NinjaToast.show(context, "Already up to date")
+                        EBToast.show(context, "Already up to date")
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    NinjaToast.show(context, "Something went wrong")
+                    EBToast.show(context, "Something went wrong")
                 }
             }
         }
@@ -404,11 +410,22 @@ object HelperUnit {
             file
         )
 
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(apkUri, "application/vnd.android.package-archive")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            @Suppress("DEPRECATION")
+            Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = apkUri
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        } else {
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
         }
+            .apply {
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, context.packageName)
+            }
 
         context.startActivity(intent)
     }
@@ -427,11 +444,11 @@ object HelperUnit {
 
     suspend fun upgradeFromSnapshot(context: Context) {
         val url =
-            "https://nightly.link/plateaukao/einkbro/workflows/buid-app-workflow.yaml/main/app-release.apk.zip"
+            "https://nightly.link/plateaukao/einkbro/workflows/buid-app-workflow.yaml/main/app-arm64-v8a-release.apk.zip"
         val request = Request.Builder().url(url).build()
         try {
             withContext(Dispatchers.Main) {
-                NinjaToast.show(context, "start downloading...")
+                EBToast.show(context, "start downloading...")
             }
 
             client.newCall(request).execute().use { response ->
@@ -439,14 +456,14 @@ object HelperUnit {
 
                 val inputStream = response.body?.byteStream()
                 withContext(Dispatchers.Main) {
-                    NinjaToast.show(context, "Extracting zip...")
+                    EBToast.show(context, "Extracting zip...")
                 }
                 extractApkAndInstall(inputStream, context)
             }
         } catch (e: Exception) {
             e.printStackTrace()
             withContext(Dispatchers.Main) {
-                NinjaToast.show(context, "Something went wrong")
+                EBToast.show(context, "Something went wrong")
             }
         }
     }
@@ -457,7 +474,7 @@ object HelperUnit {
 
         var zipEntry = zipInputStream.nextEntry
         while (zipEntry != null) {
-            if (zipEntry.name == "app-release.apk") {
+            if (zipEntry.name == "app-arm64-v8a-release.apk") {
                 val tempFile = File("${context.cacheDir.absolutePath}/app.apk")
                 if (tempFile.exists()) {
                     tempFile.delete()
@@ -488,7 +505,25 @@ object HelperUnit {
         }
     }
 
+    private val fileCache = mutableMapOf<String, String>()
+    fun loadAssetFile(fileName: String): String {
+        if (fileCache.containsKey(fileName)) {
+            return fileCache[fileName]!!
+        }
+
+        try {
+            val jsContent = EinkBroApplication.instance.assets.open(fileName).bufferedReader().use { it.readText() }
+            fileCache[fileName] = jsContent
+            return jsContent
+        } catch (e: IOException) {
+            Log.e("HelperUnit", "Failed to load asset file: $fileName")
+            e.printStackTrace()
+            return ""
+        }
+    }
+
     private const val DEFAULT_FONT_SIZE = 18
+
     /**
      * Parses a given markdown text and converts it into an [AnnotatedString] with appropriate styles.
      * from: mdparserkitcore/src/main/java/com/daksh/mdparserkit/core/ParseMarkdown.kt
@@ -621,7 +656,7 @@ object HelperUnit {
         inputText: String,
         resultBuilder: AnnotatedString.Builder,
         fontSize: TextUnit,
-        fontWeight: FontWeight = FontWeight.Normal
+        fontWeight: FontWeight = FontWeight.Normal,
     ) {
         val boldItalicPattern = Regex("\\*\\*[*_](.*?)[*_]\\*\\*")
         val boldPattern = Regex("\\*\\*(.*?)\\*\\*")
@@ -690,4 +725,90 @@ object HelperUnit {
             }
         }
     }
+
+    /**
+     * re-implementation of org.apache.commons.text.StringEscapeUtils.unescapeJava
+     */
+    fun unescapeJava(input: String): String {
+        val stringBuilder = StringBuilder()
+        var i = 0
+        while (i < input.length) {
+            val ch = input[i]
+            if (ch == '\\' && i + 1 < input.length) {
+                val nextChar = input[i + 1]
+                when (nextChar) {
+                    'n' -> stringBuilder.append('\n')
+                    't' -> stringBuilder.append('\t')
+                    'b' -> stringBuilder.append('\b')
+                    'r' -> stringBuilder.append('\r')
+                    'f' -> stringBuilder.append('\u000C')
+                    '\'' -> stringBuilder.append('\'')
+                    '"' -> stringBuilder.append('\"')
+                    '\\' -> stringBuilder.append('\\')
+                    'u' -> {
+                        if (i + 5 < input.length) {
+                            val hexCode = input.substring(i + 2, i + 6)
+                            stringBuilder.append(hexCode.toInt(16).toChar())
+                            i += 4
+                        }
+                    }
+
+                    else -> stringBuilder.append(nextChar)  // if it's not an escape sequence, keep the original
+                }
+                i += 1 // skip next character
+            } else {
+                stringBuilder.append(ch)
+            }
+            i++
+        }
+        return stringBuilder.toString()
+    }
 }
+
+fun processedTextToChunks(text: String): MutableList<String> {
+    val processedText = text.replace("\\n", " ")
+        .replace("\\\"", "")
+        .replace("\\t", "")
+        .replace("\\", "")
+    val sentences = processedText.split("(?<=\\.)(?!\\d)|(?<=。)|(?<=？)|(?<=\\?)".toRegex())
+    val chunks = sentences.fold(mutableListOf<String>()) { acc, sentence ->
+        if (acc.isEmpty() || (acc.last() + sentence).getWordCount() > 60) {
+            acc.add(sentence.trim())
+        } else {
+            val last = acc.last()
+            acc[acc.size - 1] = "$last$sentence"
+        }
+        acc
+    }
+    return chunks
+}
+
+fun String.getWordCount(): Int {
+    val trimmedInput = trim()
+    if (trimmedInput.isEmpty()) return 0
+
+    // CJ
+    if (endsWith("。") || endsWith("？") || endsWith("！")) {
+        return trimmedInput.length
+    }
+    // korean
+    val hangulRegex = "[가-힣]+".toRegex() // Matches any Hangul syllable
+    // Find all matches and return the count
+    val hangulCount = hangulRegex.findAll(trimmedInput).sumOf { it.value.length }
+    if (hangulCount > 3) return hangulCount
+
+    // Use regex to match words based on Unicode word boundaries
+    val wordRegex = "\\p{L}+".toRegex()
+    // Find all matches and return the count
+    return wordRegex.findAll(trimmedInput).count()
+}
+
+fun String.pruneWebTitle(): String =
+    if (contains("|")) {
+        substringBefore("|").trim()
+    } else if (contains("-")) {
+        substringBefore("-").trim()
+    } else {
+        this
+    }
+
