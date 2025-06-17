@@ -50,7 +50,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 14_07_00
-        versionName = "14.7.0.1"
+        versionName = "14.7.0.2"
 
         buildConfigField("String", "lastCommitTime", "\"${getLastCommitTimeStamp()}\"")
         buildConfigField("boolean", "showUpdateButton", showUpdateButton())
@@ -87,10 +87,13 @@ android {
         variant.outputs
             .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
             .forEach { output ->
+                val abiName = output.filters
+                    .find { it.filterType == "ABI" }
+                    ?.identifier ?: "universal"
                 val sdf = SimpleDateFormat("yyMMdd.HHmm")
                 val buildTime = sdf.format(Date(System.currentTimeMillis()))
                 val outputFileName =
-                    "webbrowser_${variant.baseName}_${variant.versionName}_${buildTime}.apk"
+                    "webbrowser_${variant.baseName}_${variant.versionName}_${abiName}_${buildTime}.apk"
                 output.outputFileName = outputFileName
             }
     }
