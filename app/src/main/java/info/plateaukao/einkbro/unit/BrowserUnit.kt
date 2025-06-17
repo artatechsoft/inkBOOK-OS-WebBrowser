@@ -144,7 +144,16 @@ object BrowserUnit : KoinComponent {
     }
 
     fun openFilesDownloadFolder(context: Context) {
-        context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+        val intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+            `package` = "pl.artatech.inkbookfilemanager"
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+        } else {
+            Log.e("BrowserUnit", "Files app is missing!")
+        }
     }
 
     fun openDownloadFolder(activity: Activity) {
