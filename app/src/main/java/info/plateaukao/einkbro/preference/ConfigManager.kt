@@ -836,14 +836,8 @@ class ConfigManager(
     }
 
     private fun getDefaultIconStrings(): String =
-        if (ViewUnit.isWideLayout(context)) {
-            ToolbarAction.defaultActions.joinToString(",") { action ->
-                action.ordinal.toString()
-            }
-        } else {
-            ToolbarAction.defaultActionsForPhone.joinToString(",") { action ->
-                action.ordinal.toString()
-            }
+        ToolbarAction.defaultActions.joinToString(",") { action ->
+            action.ordinal.toString()
         }
 
     companion object {
