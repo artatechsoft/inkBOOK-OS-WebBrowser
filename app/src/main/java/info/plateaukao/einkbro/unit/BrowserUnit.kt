@@ -113,7 +113,7 @@ object BrowserUnit : KoinComponent {
         return ByteArrayInputStream(imageBytes)
     }
 
-    fun createDownloadReceiver(activity: Activity): BroadcastReceiver {
+    fun createDownloadReceiver(activity: Activity, onFinish: () -> Unit): BroadcastReceiver {
         return object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (activity.isFinishing || downloadFileId == -1L) return
@@ -133,6 +133,7 @@ object BrowserUnit : KoinComponent {
                     okAction = {
                         try {
                             openFilesDownloadFolder(activity)
+                            onFinish()
                         } catch (e: Exception) {
                             e.printStackTrace()
                             EBToast.show(activity, R.string.toast_error)
