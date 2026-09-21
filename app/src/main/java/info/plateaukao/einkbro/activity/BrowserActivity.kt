@@ -361,7 +361,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         initTouchArea()
         initActionModeViewModel()
 
-        downloadReceiver = createDownloadReceiver(this)
+        downloadReceiver = createDownloadReceiver(this, onFinish = { finish() })
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(
                 downloadReceiver, IntentFilter(ACTION_DOWNLOAD_COMPLETE),
